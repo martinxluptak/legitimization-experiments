@@ -1,0 +1,743 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Parsing data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import glob, os\n",
+    "import xml.etree.ElementTree as ET\n",
+    "\n",
+    "import pprint\n",
+    "import json\n",
+    "\n",
+    "\n",
+    "TRAIN_DIR = 'annotations/train'\n",
+    "TEST_DIR = 'annotations/test'\n",
+    "\n",
+    "'''\n",
+    "Converts labelImg XML files to JSON files parsable by AWS Sagemaker Object detection\n",
+    "\n",
+    "'''\n",
+    "def get_label_id(label: str):\n",
+    "    \n",
+    "    if label == 'yellow-bd':\n",
+    "        return 0\n",
+    "    elif label == 'green-bd':\n",
+    "        return 1\n",
+    "    elif label == 'blue-bd':\n",
+    "        return 2\n",
+    "    elif label == 'pink-bd':\n",
+    "        return 3\n",
+    "    elif label == 'red-bd':\n",
+    "        return 4\n",
+    "    else:\n",
+    "        raise ValueError(\"Unknown label\")\n",
+    "\n",
+    "def xml_to_aws_json(img_dir_path: str):\n",
+    "    for filename in glob.glob(f'{img_dir_path}*.xml'):\n",
+    "        tree = ET.parse(filename)\n",
+    "        root = tree.getroot()\n",
+    "        folder = root.attrib\n",
+    "        folder = root.find('folder').text\n",
+    "        filename = root.find('filename').text\n",
+    "        \n",
+    "        d = {}\n",
+    "        d['file'] = f'{folder}/{filename}'\n",
+    "        \n",
+    "        size = root.find('size')\n",
+    "        d['image_size'] = {\n",
+    "            'width' : int(size[0].text),\n",
+    "            'height' : int(size[1].text),\n",
+    "            'depth' : int(size[2].text)\n",
+    "        }\n",
+    "        \n",
+    "        d['annotations'] = []\n",
+    "        class_names = set()\n",
+    "        anots = root.findall('object')\n",
+    "        for anot in anots:\n",
+    "            label = anot.find('name').text\n",
+    "            label_id = get_label_id(label)\n",
+    "            box = anot.find('bndbox')\n",
+    "            xmin, ymin = int(box.find('xmin').text), int(box.find('ymin').text)\n",
+    "            xmax, ymax = int(box.find('xmax').text), int(box.find('ymax').text)\n",
+    "            width = xmax - xmin\n",
+    "            height = ymax - ymin\n",
+    "            \n",
+    "            d['annotations'].append({\n",
+    "                'class_id': label_id,\n",
+    "                'left': xmin,\n",
+    "                'top': ymin,\n",
+    "                'width': width,\n",
+    "                'height': height\n",
+    "            })\n",
+    "            \n",
+    "            class_names.add(label)\n",
+    "        \n",
+    "        d['categories'] = []\n",
+    "        for name in list(class_names):\n",
+    "            d['categories'].append({\n",
+    "                'class_id': get_label_id(name),\n",
+    "                'name': name\n",
+    "            })\n",
+    "\n",
+    "        with open(f'{TRAIN_DIR}{filename[:-4]}.json', 'w+') as f: # TODO find better way than [:-4] selector\n",
+    "            json.dump(d, f)\n",
+    "\n",
+    "xml_to_aws_json('images-local/')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## labelImg format:"
+   ]
+  },
+  {
+   "cell_type": "raw",
+   "metadata": {},
+   "source": [
+    "<annotation>\n",
+    "\t<folder>images-local</folder>\n",
+    "\t<filename>bd-pic.png</filename>\n",
+    "\t<path>./bd-faces/workspace/training_bd/images-local/bd-pic.png</path>\n",
+    "\t<source>\n",
+    "\t\t<database>Unknown</database>\n",
+    "\t</source>\n",
+    "\t<size>\n",
+    "\t\t<width>1000</width>\n",
+    "\t\t<height>500</height>\n",
+    "\t\t<depth>3</depth>\n",
+    "\t</size>\n",
+    "\t<segmented>0</segmented>\n",
+    "\t<object>\n",
+    "\t\t<name>yellow-bd</name>\n",
+    "\t\t<pose>Unspecified</pose>\n",
+    "\t\t<truncated>0</truncated>\n",
+    "\t\t<difficult>0</difficult>\n",
+    "\t\t<bndbox>\n",
+    "\t\t\t<xmin>184</xmin>\n",
+    "\t\t\t<ymin>311</ymin>\n",
+    "\t\t\t<xmax>245</xmax>\n",
+    "\t\t\t<ymax>365</ymax>\n",
+    "\t\t</bndbox>\n",
+    "\t</object>\n",
+    "\t<object>\n",
+    "\t\t<name>pink-bd</name>\n",
+    "\t\t<pose>Unspecified</pose>\n",
+    "\t\t<truncated>0</truncated>\n",
+    "\t\t<difficult>0</difficult>\n",
+    "\t\t<bndbox>\n",
+    "\t\t\t<xmin>687</xmin>\n",
+    "\t\t\t<ymin>313</ymin>\n",
+    "\t\t\t<xmax>756</xmax>\n",
+    "\t\t\t<ymax>379</ymax>\n",
+    "\t\t</bndbox>\n",
+    "\t</object>\n",
+    "</annotation>\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## AWS Sagemaker object detection algorithm supported JSON format:"
+   ]
+  },
+  {
+   "cell_type": "raw",
+   "metadata": {},
+   "source": [
+    "{\n",
+    "   \"file\": \"your_image_directory/sample_image1.jpg\",\n",
+    "   \"image_size\": [\n",
+    "      {\n",
+    "         \"width\": 500,\n",
+    "         \"height\": 400,\n",
+    "         \"depth\": 3\n",
+    "      }\n",
+    "   ],\n",
+    "   \"annotations\": [\n",
+    "      {\n",
+    "         \"class_id\": 0,\n",
+    "         \"left\": 111,\n",
+    "         \"top\": 134,\n",
+    "         \"width\": 61,\n",
+    "         \"height\": 128\n",
+    "      },\n",
+    "      {\n",
+    "         \"class_id\": 0,\n",
+    "         \"left\": 161,\n",
+    "         \"top\": 250,\n",
+    "         \"width\": 79,\n",
+    "         \"height\": 143\n",
+    "      },\n",
+    "      {\n",
+    "         \"class_id\": 1,\n",
+    "         \"left\": 101,\n",
+    "         \"top\": 185,\n",
+    "         \"width\": 42,\n",
+    "         \"height\": 130\n",
+    "      }\n",
+    "   ],\n",
+    "   \"categories\": [\n",
+    "      {\n",
+    "         \"class_id\": 0,\n",
+    "         \"name\": \"dog\"\n",
+    "      },\n",
+    "      {\n",
+    "         \"class_id\": 1,\n",
+    "         \"name\": \"cat\"\n",
+    "      }\n",
+    "   ]\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Python 3.7.4\n"
+     ]
+    }
+   ],
+   "source": [
+    "!python --version"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# TensorFlow script mode training and serving\n",
+    "\n",
+    "Script mode is a training script format for TensorFlow that lets you execute any TensorFlow training script in SageMaker with minimal modification. The [SageMaker Python SDK](https://github.com/aws/sagemaker-python-sdk) handles transferring your script to a SageMaker training instance. On the training instance, SageMaker's native TensorFlow support sets up training-related environment variables and executes your training script. In this tutorial, we use the SageMaker Python SDK to launch a training job and deploy the trained model.\n",
+    "\n",
+    "Script mode supports training with a Python script, a Python module, or a shell script. In this example, we use a Python script to train a classification model on the [MNIST dataset](http://yann.lecun.com/exdb/mnist/). In this example, we will show how easily you can train a SageMaker using TensorFlow 1.x and TensorFlow 2.0 scripts with SageMaker Python SDK. In addition, this notebook demonstrates how to perform real time inference with the [SageMaker TensorFlow Serving container](https://github.com/aws/sagemaker-tensorflow-serving-container). The TensorFlow Serving container is the default inference method for script mode. For full documentation on the TensorFlow Serving container, please visit [here](https://github.com/aws/sagemaker-python-sdk/blob/master/src/sagemaker/tensorflow/deploying_tensorflow_serving.rst).\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Set up the environment\n",
+    "\n",
+    "Let's start by setting up the environment:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "CONTRIBUTORS.md  images\t\t  LICENSE    requirements.txt  setup.py   tests\n",
+      "examples\t keras_retinanet  README.md  setup.cfg\t       snapshots\n",
+      "WARNING: pip is being invoked by an old script wrapper. This will fail in a future version of pip.\n",
+      "Please see https://github.com/pypa/pip/issues/5599 for advice on fixing the underlying issue.\n",
+      "To avoid this problem you can invoke Python with '-m pip' instead of running pip directly.\n",
+      "Requirement already satisfied: numpy in /opt/conda/lib/python3.7/site-packages (1.18.2)\n",
+      "WARNING: pip is being invoked by an old script wrapper. This will fail in a future version of pip.\n",
+      "Please see https://github.com/pypa/pip/issues/5599 for advice on fixing the underlying issue.\n",
+      "To avoid this problem you can invoke Python with '-m pip' instead of running pip directly.\n",
+      "Processing /home/jovyan/work/training_legitmization/scripts/keras-retinanet\n",
+      "Requirement already satisfied: keras in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (2.3.1)\n",
+      "Requirement already satisfied: keras-resnet==0.1.0 in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (0.1.0)\n",
+      "Requirement already satisfied: six in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (1.12.0)\n",
+      "Requirement already satisfied: scipy in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (1.4.1)\n",
+      "Requirement already satisfied: cython in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (0.29.16)\n",
+      "Requirement already satisfied: Pillow in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (7.0.0)\n",
+      "Requirement already satisfied: opencv-python in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (4.2.0.32)\n",
+      "Requirement already satisfied: progressbar2 in /opt/conda/lib/python3.7/site-packages (from keras-retinanet==0.5.1) (3.50.1)\n",
+      "Requirement already satisfied: numpy>=1.9.1 in /opt/conda/lib/python3.7/site-packages (from keras->keras-retinanet==0.5.1) (1.18.2)\n",
+      "Requirement already satisfied: keras-preprocessing>=1.0.5 in /opt/conda/lib/python3.7/site-packages (from keras->keras-retinanet==0.5.1) (1.1.0)\n",
+      "Requirement already satisfied: keras-applications>=1.0.6 in /opt/conda/lib/python3.7/site-packages (from keras->keras-retinanet==0.5.1) (1.0.8)\n",
+      "Requirement already satisfied: h5py in /opt/conda/lib/python3.7/site-packages (from keras->keras-retinanet==0.5.1) (2.10.0)\n",
+      "Requirement already satisfied: pyyaml in /opt/conda/lib/python3.7/site-packages (from keras->keras-retinanet==0.5.1) (5.3)\n",
+      "Requirement already satisfied: python-utils>=2.3.0 in /opt/conda/lib/python3.7/site-packages (from progressbar2->keras-retinanet==0.5.1) (2.4.0)\n",
+      "Building wheels for collected packages: keras-retinanet\n",
+      "  Building wheel for keras-retinanet (setup.py) ... \u001b[?25ldone\n",
+      "\u001b[?25h  Created wheel for keras-retinanet: filename=keras_retinanet-0.5.1-cp37-cp37m-linux_x86_64.whl size=174779 sha256=d971b1a921920c21a0335cfe9accb120cf18ecffc83333cafe0ccb8aca854510\n",
+      "  Stored in directory: /home/jovyan/.cache/pip/wheels/af/21/78/37c94f5154338c4f0e22c7ffaabadcb2141748812c27b3a960\n",
+      "Successfully built keras-retinanet\n",
+      "Installing collected packages: keras-retinanet\n",
+      "\u001b[33m  WARNING: The scripts retinanet-convert-model, retinanet-debug, retinanet-evaluate and retinanet-train are installed in '/home/jovyan/.local/bin' which is not on PATH.\n",
+      "  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.\u001b[0m\n",
+      "Successfully installed keras-retinanet-0.5.1\n"
+     ]
+    }
+   ],
+   "source": [
+    "keras_retinanet_path = \"../scripts/keras-retinanet\"\n",
+    "!ls ../scripts/keras-retinanet\n",
+    "!pip install numpy\n",
+    "!pip install --user ../scripts/keras-retinanet"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import sys\n",
+    "sys.path.append(keras_retinanet_path)\n",
+    "from keras_retinanet.bin.train import create_models"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Create a training job using the `TensorFlow` estimator\n",
+    "\n",
+    "The `sagemaker.tensorflow.TensorFlow` estimator handles locating the script mode container, uploading the script to a S3 location and creating a SageMaker training job. Let's call out a couple important parameters here:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "%%time\n",
+    "import sagemaker\n",
+    "from sagemaker import get_execution_role\n",
+    "\n",
+    "role = get_execution_role()\n",
+    "print(role)\n",
+    "# sess = sagemaker.Session()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Save models during training:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 57,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard\n",
+    "from datetime import datetime"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 58,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "checkpoint_filepath =\"checkpoints/weights-improvement-{epoch:02d}-{val_accuracy:.2f}.hdf5\"\n",
+    "checkpoint = ModelCheckpoint(\n",
+    "    checkpoint_filepath,\n",
+    "    monitor='val_accuracy',\n",
+    "    verbose=1,\n",
+    "    save_best_only=False,\n",
+    "    mode='max'\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Hook up tensorboard:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 66,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "log_dir = \"logs\" + datetime.now().strftime(\"%Y%m%d-%H%M%S\")\n",
+    "tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Create model keras retinanet model:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 73,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Creating model, this may take a second...\n",
+      "tracking <tf.Variable 'Variable:0' shape=(9, 4) dtype=float32, numpy=\n",
+      "array([[-22.627417, -11.313708,  22.627417,  11.313708],\n",
+      "       [-28.50876 , -14.25438 ,  28.50876 ,  14.25438 ],\n",
+      "       [-35.918785, -17.959393,  35.918785,  17.959393],\n",
+      "       [-16.      , -16.      ,  16.      ,  16.      ],\n",
+      "       [-20.158737, -20.158737,  20.158737,  20.158737],\n",
+      "       [-25.398417, -25.398417,  25.398417,  25.398417],\n",
+      "       [-11.313708, -22.627417,  11.313708,  22.627417],\n",
+      "       [-14.25438 , -28.50876 ,  14.25438 ,  28.50876 ],\n",
+      "       [-17.959393, -35.918785,  17.959393,  35.918785]], dtype=float32)> anchors\n",
+      "tracking <tf.Variable 'Variable:0' shape=(9, 4) dtype=float32, numpy=\n",
+      "array([[-45.254833, -22.627417,  45.254833,  22.627417],\n",
+      "       [-57.01752 , -28.50876 ,  57.01752 ,  28.50876 ],\n",
+      "       [-71.83757 , -35.918785,  71.83757 ,  35.918785],\n",
+      "       [-32.      , -32.      ,  32.      ,  32.      ],\n",
+      "       [-40.317474, -40.317474,  40.317474,  40.317474],\n",
+      "       [-50.796833, -50.796833,  50.796833,  50.796833],\n",
+      "       [-22.627417, -45.254833,  22.627417,  45.254833],\n",
+      "       [-28.50876 , -57.01752 ,  28.50876 ,  57.01752 ],\n",
+      "       [-35.918785, -71.83757 ,  35.918785,  71.83757 ]], dtype=float32)> anchors\n",
+      "tracking <tf.Variable 'Variable:0' shape=(9, 4) dtype=float32, numpy=\n",
+      "array([[ -90.50967 ,  -45.254833,   90.50967 ,   45.254833],\n",
+      "       [-114.03504 ,  -57.01752 ,  114.03504 ,   57.01752 ],\n",
+      "       [-143.67514 ,  -71.83757 ,  143.67514 ,   71.83757 ],\n",
+      "       [ -64.      ,  -64.      ,   64.      ,   64.      ],\n",
+      "       [ -80.63495 ,  -80.63495 ,   80.63495 ,   80.63495 ],\n",
+      "       [-101.593666, -101.593666,  101.593666,  101.593666],\n",
+      "       [ -45.254833,  -90.50967 ,   45.254833,   90.50967 ],\n",
+      "       [ -57.01752 , -114.03504 ,   57.01752 ,  114.03504 ],\n",
+      "       [ -71.83757 , -143.67514 ,   71.83757 ,  143.67514 ]],\n",
+      "      dtype=float32)> anchors\n",
+      "tracking <tf.Variable 'Variable:0' shape=(9, 4) dtype=float32, numpy=\n",
+      "array([[-181.01933,  -90.50967,  181.01933,   90.50967],\n",
+      "       [-228.07008, -114.03504,  228.07008,  114.03504],\n",
+      "       [-287.35028, -143.67514,  287.35028,  143.67514],\n",
+      "       [-128.     , -128.     ,  128.     ,  128.     ],\n",
+      "       [-161.2699 , -161.2699 ,  161.2699 ,  161.2699 ],\n",
+      "       [-203.18733, -203.18733,  203.18733,  203.18733],\n",
+      "       [ -90.50967, -181.01933,   90.50967,  181.01933],\n",
+      "       [-114.03504, -228.07008,  114.03504,  228.07008],\n",
+      "       [-143.67514, -287.35028,  143.67514,  287.35028]], dtype=float32)> anchors\n",
+      "tracking <tf.Variable 'Variable:0' shape=(9, 4) dtype=float32, numpy=\n",
+      "array([[-362.03867, -181.01933,  362.03867,  181.01933],\n",
+      "       [-456.14017, -228.07008,  456.14017,  228.07008],\n",
+      "       [-574.70056, -287.35028,  574.70056,  287.35028],\n",
+      "       [-256.     , -256.     ,  256.     ,  256.     ],\n",
+      "       [-322.5398 , -322.5398 ,  322.5398 ,  322.5398 ],\n",
+      "       [-406.37466, -406.37466,  406.37466,  406.37466],\n",
+      "       [-181.01933, -362.03867,  181.01933,  362.03867],\n",
+      "       [-228.07008, -456.14017,  228.07008,  456.14017],\n",
+      "       [-287.35028, -574.70056,  287.35028,  574.70056]], dtype=float32)> anchors\n"
+     ]
+    }
+   ],
+   "source": [
+    "from keras_retinanet import models\n",
+    "from keras_retinanet.utils.transform import random_transform_generator\n",
+    "from keras_retinanet.preprocessing.csv_generator import CSVGenerator\n",
+    "from keras_retinanet.utils.image import random_visual_effect_generator\n",
+    "\n",
+    "# create object that stores backbone information\n",
+    "backbone = models.backbone('resnet50')\n",
+    "\n",
+    "# make sure keras and tensorflow are the minimum required version\n",
+    "# check_keras_version()\n",
+    "# check_tf_version()\n",
+    "\n",
+    "# optionally choose specific GPU\n",
+    "# if args.gpu is not None:\n",
+    "#     setup_gpu(args.gpu)\n",
+    "\n",
+    "def create_generators(args, preprocess_image):\n",
+    "    \"\"\" Create generators for training and validation.\n",
+    "\n",
+    "    Args\n",
+    "        args             : parseargs object containing configuration for generators.\n",
+    "        preprocess_image : Function that preprocesses an image for the network.\n",
+    "    \"\"\"\n",
+    "    common_args = {\n",
+    "        'batch_size'       : args.batch_size,\n",
+    "        'image_min_side'   : args.image_min_side,\n",
+    "        'image_max_side'   : args.image_max_side,\n",
+    "        'no_resize'        : args.no_resize,\n",
+    "        'preprocess_image' : preprocess_image,\n",
+    "    }\n",
+    "\n",
+    "    # create random transform generator for augmenting training data\n",
+    "    transform_generator = random_transform_generator(\n",
+    "        min_rotation=-0.1,\n",
+    "        max_rotation=0.1,\n",
+    "        min_translation=(-0.1, -0.1),\n",
+    "        max_translation=(0.1, 0.1),\n",
+    "        min_shear=-0.1,\n",
+    "        max_shear=0.1,\n",
+    "        min_scaling=(0.9, 0.9),\n",
+    "        max_scaling=(1.1, 1.1),\n",
+    "        flip_x_chance=0.5,\n",
+    "        flip_y_chance=0.5,\n",
+    "    )\n",
+    "    visual_effect_generator = random_visual_effect_generator(\n",
+    "        contrast_range=(0.9, 1.1),\n",
+    "        brightness_range=(-.1, .1),\n",
+    "        hue_range=(-0.05, 0.05),\n",
+    "        saturation_range=(0.95, 1.05)\n",
+    "    )\n",
+    "    if args.dataset_type == 'csv':\n",
+    "        train_generator = CSVGenerator(\n",
+    "            args.annotations,\n",
+    "            args.classes,\n",
+    "            transform_generator=transform_generator,\n",
+    "            visual_effect_generator=visual_effect_generator,\n",
+    "            **common_args\n",
+    "        )\n",
+    "\n",
+    "        if args.val_annotations:\n",
+    "            validation_generator = CSVGenerator(\n",
+    "                args.val_annotations,\n",
+    "                args.classes,\n",
+    "                shuffle_groups=False,\n",
+    "                **common_args\n",
+    "            )\n",
+    "        else:\n",
+    "            validation_generator = None\n",
+    "    \n",
+    "    return train_generator, validation_generator\n",
+    "\n",
+    "class Args:\n",
+    "    pass\n",
+    "\n",
+    "args = Args()\n",
+    "args.batch_size = 32\n",
+    "args.steps = 400\n",
+    "args.epochs = 40\n",
+    "args.initial_epoch = 0\n",
+    "args.image_min_side = 512\n",
+    "args.image_max_side = 512\n",
+    "args.dataset_type = 'csv'\n",
+    "args.annotations = 'train.csv'\n",
+    "args.val_annotations = ''\n",
+    "args.classes = 'label_map'\n",
+    "args.freeze_backbone = False\n",
+    "args.preprocess_image = True\n",
+    "args.no_resize = False\n",
+    "args.lr = 0.0001\n",
+    "args.workers = 1\n",
+    "args.callbacks = [checkpoint, tensorboard_callback]\n",
+    "args.max_queue_size = 10\n",
+    "args.multiprocessing = True\n",
+    "\n",
+    "# create the generators\n",
+    "train_generator, validation_generator = create_generators(args, backbone.preprocess_image)\n",
+    "weights = backbone.download_imagenet()\n",
+    "\n",
+    "\n",
+    "print('Creating model, this may take a second...')\n",
+    "model, training_model, prediction_model = create_models(\n",
+    "    backbone_retinanet=backbone.retinanet,\n",
+    "    num_classes=1,\n",
+    "    weights=weights,\n",
+    "    freeze_backbone=args.freeze_backbone,\n",
+    "    lr=args.lr,\n",
+    ")\n",
+    "\n",
+    "# print(model.summary())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Launch locally:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "%load_ext tensorboard\n",
+    "%tensorboard --logdir logs/fitmax\n",
+    "\n",
+    "training_model.fit_generator(\n",
+    "        generator=train_generator,\n",
+    "        steps_per_epoch=args.steps,\n",
+    "        epochs=args.epochs,\n",
+    "        verbose=1,\n",
+    "        callbacks=args.callbacks,\n",
+    "        workers=args.workers,\n",
+    "        use_multiprocessing=args.multiprocessing,\n",
+    "        max_queue_size=args.max_queue_size,\n",
+    "        validation_data=validation_generator,\n",
+    "        initial_epoch=args.initial_epoch\n",
+    "    )"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Launch on sagemaker:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "training_data_uri = 's3://sagemaker-retinanet50/2000label'\n",
+    "\n",
+    "%env AWS_DEFAULT_REGION=eu-central-1\n",
+    "\n",
+    "from sagemaker.tensorflow import TensorFlow\n",
+    "\n",
+    "import boto3\n",
+    "import sagemaker\n",
+    "from sagemaker.amazon.amazon_estimator import get_image_uri\n",
+    "\n",
+    "\n",
+    "\n",
+    "sess = sagemaker.Session()\n",
+    "\n",
+    "estimator = TensorFlow(entry_point=\"train.py\",\n",
+    "                             role='sageMakerFull',\n",
+    "                             train_instance_count=1,\n",
+    "                             train_instance_type='ml.p3.2xlarge',\n",
+    "                             framework_version='2.1.0',\n",
+    "                             py_version='py3',\n",
+    "                             distributions={'parameter_server': {'enabled': True}})\n",
+    "\n",
+    "estimator.fit(training_data_uri)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Hyperparameter tuning"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Defaulting to user installation because normal site-packages is not writeable\n",
+      "Requirement already satisfied: keras-tuner in /home/leix/.local/lib/python3.8/site-packages (1.0.1)\n",
+      "Requirement already satisfied: numpy in /usr/lib/python3.8/site-packages (from keras-tuner) (1.18.4)\n",
+      "Requirement already satisfied: tqdm in /usr/lib/python3.8/site-packages (from keras-tuner) (4.46.0)\n",
+      "Requirement already satisfied: requests in /usr/lib/python3.8/site-packages (from keras-tuner) (2.23.0)\n",
+      "Requirement already satisfied: scikit-learn in /home/leix/.local/lib/python3.8/site-packages (from keras-tuner) (0.22.1)\n",
+      "Requirement already satisfied: terminaltables in /home/leix/.local/lib/python3.8/site-packages (from keras-tuner) (3.1.0)\n",
+      "Requirement already satisfied: future in /home/leix/.local/lib/python3.8/site-packages (from keras-tuner) (0.18.2)\n",
+      "Requirement already satisfied: scipy in /home/leix/.local/lib/python3.8/site-packages (from keras-tuner) (1.4.1)\n",
+      "Requirement already satisfied: colorama in /usr/lib/python3.8/site-packages (from keras-tuner) (0.4.3)\n",
+      "Requirement already satisfied: tabulate in /home/leix/.local/lib/python3.8/site-packages (from keras-tuner) (0.8.6)\n",
+      "Requirement already satisfied: chardet>=3.0.2 in /usr/lib/python3.8/site-packages (from requests->keras-tuner) (3.0.4)\n",
+      "Requirement already satisfied: idna>=2.5 in /usr/lib/python3.8/site-packages (from requests->keras-tuner) (2.9)\n",
+      "Requirement already satisfied: urllib3>=1.21.1 in /usr/lib/python3.8/site-packages (from requests->keras-tuner) (1.25.9)\n",
+      "Requirement already satisfied: joblib>=0.11 in /home/leix/.local/lib/python3.8/site-packages (from scikit-learn->keras-tuner) (0.14.1)\n",
+      "Python 3.8.2\n"
+     ]
+    }
+   ],
+   "source": [
+    "!pip install keras-tuner"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# from kerastuner import HyperModel\n",
+    "from tensorflow import keras\n",
+    "from tensorflow.keras import layers\n",
+    "from kerastuner.tuners import BayesianOptimization\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "tuner = RandomSearch(\n",
+    "    training_model,\n",
+    "    objective='val_accuracy',\n",
+    "    max_trials=10,\n",
+    "    directory='data_merged',\n",
+    "    project_name='BD')\n",
+    "\n",
+    "tuner.search(x, y,\n",
+    "             epochs=5,\n",
+    "             validation_data=(val_x, val_y))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "tuner.results_summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "models = tuner.get_best_models(num_models=5)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.4"
+  },
+  "notice": "Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.  Licensed under the Apache License, Version 2.0 (the \"License\"). You may not use this file except in compliance with the License. A copy of the License is located at http://aws.amazon.com/apache2.0/ or in the \"license\" file accompanying this file. This file is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License."
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
