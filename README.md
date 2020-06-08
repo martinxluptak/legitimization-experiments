@@ -27,3 +27,7 @@ A bunch of Jupyter notebooks and tensorboard graphs:
 ### Adadelta, RMSProp optimizer graphs in hyperparameter tuning (from SageMaker):  
 ![RMSProp optimizer in hyperparameter tuning (from SageMaker)](previews/preview-rmsprop-wd.png)
 ![Adadelta optimizer in hyperparameter tuning (from SageMaker)](previews/preview-adadelta-hyperparameters.png)
+
+
+## Thesis: Legitimizing monitored subjects using image recognition techniques
+I will add the link to my thesis as soon as it is publicly available on the university's server.
